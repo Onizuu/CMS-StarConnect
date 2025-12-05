@@ -1,0 +1,297 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  password     String
+  name         String?
+  role         String   @default("USER")
+  isActive     Boolean  @default(true)
+  
+  // Profile fields
+  bio          String?
+  avatar       String?
+  banner       String?
+  socialLinks  Json?
+  customTheme  Json?
+  isPublic     Boolean  @default(true)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  refreshTokens          RefreshToken[]
+  content                Content[]
+  media                  Media[]
+  crisisMode             CrisisMode?
+  socialAccounts         SocialAccount[]
+  socialPosts            SocialPost[]
+  publishQueue           PublishQueue[]
+  pageViews              PageView[]
+  analyticsSummary       AnalyticsSummary[]
+  products               Product[]
+  donations              Donation[]
+  subscriptions          Subscription[]   @relation("UserSubscriptions")
+  creatorSubscriptions   Subscription[]   @relation("CreatorSubscriptions")
+  newsletterSubscribers  NewsletterSubscriber[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+model Content {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String
+  title       String
+  slug        String   @unique
+  body        Json
+  excerpt     String?
+  status      String   @default("DRAFT")
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialPosts  SocialPost[]
+  publishQueue PublishQueue[]
+  pageViews    PageView[]
+  comments     Comment[]
+  
+  @@index([userId])
+  @@index([slug])
+  @@index([status])
+}
+
+model Media {
+  id        String   @id @default(uuid())
+  userId    String
+  filename  String
+  mimetype  String
+  size      Int
+  url       String
+  thumbnail String?
+  createdAt DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+model CrisisMode {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  isActive    Boolean   @default(false)
+  title       String
+  message     String
+  activatedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SocialAccount {
+  id             String    @id @default(uuid())
+  userId         String
+  platform       String    // 'TWITTER', 'FACEBOOK', 'INSTAGRAM'
+  platformUserId String
+  username       String
+  accessToken    String    // Encrypted
+  refreshToken   String?   // Encrypted
+  tokenExpiry    DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, platform])
+  @@index([userId])
+}
+
+model SocialPost {
+  id             String   @id @default(uuid())
+  userId         String
+  contentId      String?  // Lien avec Content si syndication
+  platform       String
+  platformPostId String
+  text           String   // Renamed from 'content' to avoid conflict
+  mediaUrls      Json?
+  publishedAt    DateTime
+  likes          Int      @default(0)
+  shares         Int      @default(0)
+  comments       Int      @default(0)
+  url            String?
+  createdAt      DateTime @default(now())
+  
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceContent  Content? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([contentId])
+  @@index([platform])
+}
+
+model PublishQueue {
+  id           String    @id @default(uuid())
+  userId       String
+  contentId    String
+  platforms    Json      // ['TWITTER', 'FACEBOOK']
+  status       String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  scheduledFor DateTime?
+  error        String?
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+  
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status])
+}
+
+model PageView {
+  id        String   @id @default(uuid())
+  contentId String?  // Null si page profil
+  userId    String?  // L'auteur du contenu
+  visitorId String   // Hash anonyme du visiteur
+  page      String   // /p/slug ou /u/username
+  referrer  String?
+  userAgent String?
+  country   String?
+  createdAt DateTime @default(now())
+  duration  Int?     // Secondes passées (calculé client-side)
+  
+  content Content? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([contentId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([visitorId])
+}
+
+model AnalyticsSummary {
+  id             String   @id @default(uuid())
+  userId         String
+  date           DateTime
+  totalViews     Int      @default(0)
+  uniqueVisitors Int      @default(0)
+  avgDuration    Int      @default(0)
+  topContent     Json?    // {contentId: views}
+  topReferrers   Json?    // {referrer: count}
+  createdAt      DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  contentId String
+  author    String   // Nom de l'auteur (public, non-connecté)
+  email     String?  // Email (optionnel, pour notifications)
+  text      String   @db.Text
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED, SPAM
+  parentId  String?  // Pour les réponses
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  content Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  parent  Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentReplies")
+  
+  @@index([contentId])
+  @@index([status])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  description String   @db.Text
+  price       Int      // Prix en centimes
+  currency    String   @default("USD")
+  image       String?
+  stock       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([isActive])
+}
+
+model Donation {
+  id            String   @id @default(uuid())
+  userId        String   // Le créateur qui reçoit
+  donorName     String?
+  donorEmail    String?
+  amount        Int      // Montant en centimes
+  currency      String   @default("USD")
+  message       String?
+  stripeId      String?  // Stripe payment intent ID
+  status        String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  createdAt     DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status])
+}
+
+model Subscription {
+  id              String   @id @default(uuid())
+  userId          String   // Le fan qui s'abonne
+  creatorId       String   // Le créateur
+  tier            String   // BASIC, PRO, PREMIUM
+  status          String   @default("ACTIVE") // ACTIVE, CANCELLED, EXPIRED
+  stripeId        String?  // Stripe subscription ID
+  currentPeriodEnd DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user    User @relation("UserSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+  creator User @relation("CreatorSubscriptions", fields: [creatorId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([creatorId])
+  @@index([status])
+}
+
+model NewsletterSubscriber {
+  id        String   @id @default(uuid())
+  userId    String?  // Lié au créateur dont on suit la newsletter
+  email     String
+  name      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, email])
+  @@index([userId])
+  @@index([isActive])
+}
